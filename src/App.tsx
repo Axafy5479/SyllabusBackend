@@ -8,11 +8,12 @@ const driveModule = new DriveModule();
 function App() {
 
     // 処理中か否か
+    // 処理中は追加でリクエストを飛ばさないようにする
     const [isBusy, setIsBusy] = useState<boolean>(false);
 
     /************** Key, Value ペアを保存する **************/
     // 保存するKey, Value ペア
-    const [settingKey, setSetingKey] = useState<string>("");
+    const [settingKey, setSetingKey] = useState<string>(""); 
     const [settingValue, setSetingValue] = useState<string>("");
 
     // setボタンの挙動
@@ -30,7 +31,7 @@ function App() {
 
     // getボタンの挙動
     async function onGet() {
-        setIsBusy(true);
+        setIsBusy(true); 
         const res = await driveModule.getItem(gettingKey);
         if (IsError(res)) setGotValue(res.title);
         else if (res == undefined) setGotValue("undefined");

@@ -1,24 +1,25 @@
 import waitUntil from "async-wait-until";
 import * as err from "./error";
+import { getAccessTokenCookie, setAccessTokenCookie } from "../cookieUtil";
 
 /**
  * google authを行うモジュール
  */
 export class AuthModule {
-    failedToLoadModule = {hasError:false,message:""};
+    failedToLoadModule = { hasError: false, message: "" };
 
     private async initialize() {
-        this.failedToLoadModule = {hasError:false,message:""};
+        this.failedToLoadModule = { hasError: false, message: "" };
 
         if (!this.gapiInited) {
             this.addScriptElement("https://apis.google.com/js/api.js", () => {
-                this.gapiLoaded((err) => this.failedToLoadModule = {hasError:true,message:err});
+                this.gapiLoaded((err) => this.failedToLoadModule = { hasError: true, message: err });
             })
         }
 
         if (!this.gisInited) {
             this.addScriptElement("https://accounts.google.com/gsi/client", () => {
-                this.gisLoaded((err) => this.failedToLoadModule = {hasError:true,message:err});
+                this.gisLoaded((err) => this.failedToLoadModule = { hasError: true, message: err });
             });
         }
 
@@ -26,7 +27,7 @@ export class AuthModule {
         await waitUntil(() => this.gisInited && this.gapiInited || this.failedToLoadModule.hasError, { timeout: 1000000 });
         if (this.failedToLoadModule.hasError) return;
 
-        if(gapi.client.getToken()==null){
+        if (gapi.client.getToken() == null) {
             // Auth
             this.signin();
         }
@@ -78,7 +79,10 @@ export class AuthModule {
         this.tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: import.meta.env.VITE_CLIENT_ID,
             scope: import.meta.env.VITE_SCOPES,
-            callback: _ => this.hasTokenObtained = true,
+            callback: tokenRes => {
+                setAccessTokenCookie(tokenRes.access_token)
+                this.hasTokenObtained = true;
+            },
             error_callback: onError,
         });
         this.gisInited = true;
@@ -113,14 +117,20 @@ export class AuthModule {
      */
     private signin() {
 
-        if (this.tokenClient != null) {
-            // すでにトークンを取得済みか否かで場合わけ
-            if (gapi.client.getToken() == null) {
-                // 持っていない場合は新しく取得
-                this.tokenClient.requestAccessToken({ prompt: 'consent' });
-            } else {
-                // 持っている場合はスキップ
-                this.tokenClient.requestAccessToken({ prompt: '' });
+        const tokenCookie = getAccessTokenCookie();
+        if (tokenCookie != undefined) {
+            gapi.client.setToken({ access_token: tokenCookie });
+            this.hasTokenObtained = true;
+        } else {
+            if (this.tokenClient != null) {
+                // すでにトークンを取得済みか否かで場合わけ
+                if (gapi.client.getToken() == null) {
+                    // 持っていない場合は新しく取得
+                    this.tokenClient.requestAccessToken({ prompt: 'consent' });
+                } else {
+                    // 持っている場合はスキップ
+                    this.tokenClient.requestAccessToken({ prompt: '' });
+                }
             }
         }
     }
@@ -134,13 +144,12 @@ export class AuthModule {
     /**
      * google driveのapiを返す
      */
-    public async auth():Promise<err.ErrorInfo|null> {
+    public async auth(): Promise<err.ErrorInfo | null> {
         if (!this.gapiInited || !this.gisInited || gapi.client.getToken() == null) {
             await this.initialize();
         }
 
-        if(this.failedToLoadModule.hasError)
-        {
+        if (this.failedToLoadModule.hasError) {
             return err.Err_LoadModule(this.failedToLoadModule.message);
         }
         return null;

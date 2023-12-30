@@ -10,14 +10,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "async-wait-until": "^2.0.12",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
     "@types/gapi.auth2": "^0.0.60",
     "@types/gapi.client.drive-v3": "^0.0.4",
-    "@types/google.accounts": "^0.0.14"
+    "@types/google.accounts": "^0.0.14",
+    "async-wait-until": "^2.0.12",
+    "js-cookie": "^3.0.5",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@types/js-cookie": "^3.0.6",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@typescript-eslint/eslint-plugin": "^6.14.0",

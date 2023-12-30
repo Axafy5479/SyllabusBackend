@@ -328,9 +328,6 @@ export class DriveModule {
 
             this.isBusy = true;
 
-            // google drive api のモジュールを取得
-            const driveModule = await this.authModule.auth();
-
             // ユーザーファイルを取得
             const file = await this.getUserDataFile();
             if(err.IsError(file)) return file;
