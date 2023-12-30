@@ -1,142 +1,352 @@
 import { AuthModule } from "./AuthModule";
+import * as err from "./error";
 
+/**
+ * セーブファイルのidと内容。
+ * 
+ * ファイルを扱う際、idとその内容を用いることがほとんどなので、
+ * これら2つの扱いやすい型を定義している
+ */
 export type SaveFileInfo = {
+
+    // Google DriveにおけるファイルのId
     fileId: string,
+
+    // ファイルの内容 (key-value-pair)
     content: { [key: string]: string },
 }
 
+/**
+ * Google Driveにデータを保存するためのapiを提供するクラス
+ * local storage のインターフェースと揃えている。
+ * 
+ * - setItem (key valueペアを追加する)
+ * - getItem (keyを指定してvalueを取得する)
+ * - deleteAllItem (ファイルを削除する)
+ */
 export class DriveModule {
     public constructor() {
         this.authModule = new AuthModule();
     }
 
+    // authを行うクラス
     private authModule: AuthModule;
-    private FILE_NAME: string = "userData.json";
 
+
+    // セーブファイルのメタデータ
+    private static FILE_METADATA = {
+        name: "userData.json", // ファイル名
+        parents: ['appDataFolder'], // 保存場所として appDataFolder を指定
+        mimeType: "text/plain"
+    };
+
+    // 現在drive fileの操作中か否か
     public isBusy = false;
 
     /**
-     * SyllabusプロジェクトのAppDataファイルを全て取得する
-     * @returns 全てのAppDataファイル
-     */
-    private async getAllAppDataFiles(): Promise<gapi.client.drive.File[]> {
-        const drive = await this.authModule.GoogleDrive();
-        const res = await drive.files.list({ spaces: "appDataFolder" });
-        return res.result.files ?? [];
-    }
-
-    /**
      * ユーザーデータファイルを取得
+     * AppDataフォルダに配置するファイルは1つであることを想定している。
+     * その唯一のファイルを返す
+     * 
+     * 1. モジュールを用いてappdataフォルダー内の全てのファイルを取得
+     * 2. ファイルがない場合はundefined、1つである場合はそのファイルを、複数の場合はエラーを返す
      */
-    private async getUserDataFile(): Promise<gapi.client.drive.File | undefined> {
-        const files = await this.getAllAppDataFiles();
-        return files.find(f => f.name == this.FILE_NAME);
-    }
+    private async getUserDataFile(): Promise<gapi.client.drive.File | undefined | err.ErrorInfo> {
 
-    /**
-     * セーブを行う
-     * @param content セーブしたい内容
-     */
-    public async setItem(key: string, content: string) {
-        this.isBusy = true;
-        try {
-            let saveData = await this.getUserData();
-            if (saveData == null) {
-                const userFile = await this.createFile();
-                saveData = { fileId: userFile.id!, content: {} };
-            }
-            saveData.content[key] = content;
-            await this.updateFile(saveData);
-        } catch (err) {
-            console.error("データの保存に失敗しました");
-            console.error(err);
-        }
-        this.isBusy = false;
+        // 1. appdataフォルダ内のファイルを取得
+        const res = await gapi.client.drive.files.list({ spaces: "appDataFolder" });
+
+        // 2a. ファイルが存在しない場合はundefinedを返す
+        if (res.result.files == undefined || res.result.files.length == 0) return undefined;
+
+        // 2b. ファイルが複数存在する場合は想定していない
+        else if (res.result.files.length > 1) return err.Err_DriveFileNumber();
+
+        // 唯一のファイルを返す
+        else return res.result.files[0];
     }
 
     /**
      * AppDataフォルダ内にファイルを作成する
+     * 
+     * 1. ファイルを複数作成することは想定していない場合は。既にファイルが存在していた場合はエラーを返す。
+     * 2. ファイルを作成し、それを返す。
+     * 
      * @returns 作成したファイル
      */
-    private async createFile(): Promise<gapi.client.drive.File> {
-        const fileMetadata = {
-            name: this.FILE_NAME, // ファイル名
-            parents: ['appDataFolder'], // appdata領域への指定
-            mimeType: "text/plain",
-        };
-        const drive = await this.authModule.GoogleDrive();
-        const res = await drive.files.create({
-            resource: fileMetadata
-        })
-        return res.result;
+    private async createFile(): Promise<gapi.client.drive.File | err.ErrorInfo> {
+
+        // 1. ファイル数の確認
+        const noFile = (await this.getUserDataFile()) == undefined;
+        if(!noFile) return err.Err_CreateSecondFile();
+
+        // 2. ファイルを作成して返す
+        const res = await gapi.client.drive.files.create({resource: DriveModule.FILE_METADATA});
+
+        if(res.status == 200) return res.result;
+        else return err.Err_CreateFile(res.statusText);
     }
 
     /**
-     * ファイル内容を上書きする
-     * @param fileId 上書きするファイルのId
-     * @param content 保存したい内容
+     * ファイル内容を上書きする。
+     * 
+     * 更新したいファイルの内容を引数として受け取る。
+     * 1. ユーザーデータのファイルが既にドライブ上に存在することを確認する。
+     * 2. この内容をシリアル化する
+     * 3. 更新リクエストを飛ばす
+     * 
+     * @param saveFileInfo この引数の内容でデータを更新する
      */
-    private async updateFile(saveFileInfo: SaveFileInfo) {
+    private async updateFile(saveFileInfo: SaveFileInfo): Promise<err.ErrorInfo|void> {
+
+        // 1. ファイルが存在することを確認
+        const userDataFile = await this.getUserDataFile();
+        if(err.IsError(userDataFile))return userDataFile;
+        if(userDataFile==undefined) return err.Err_NoFileToUpdate();
+
+        // 2. シリアル化
         const blob = new Blob([JSON.stringify(saveFileInfo.content)], { type: 'text/plain' });
-        await fetch(`https://www.googleapis.com/upload/drive/v3/files/${saveFileInfo.fileId}`, {
-            method: 'PATCH',
-            headers: new Headers({
-                'Authorization': `Bearer ${gapi.client.getToken().access_token}`,
-                'Content-Type': 'text/plain'
-            }),
-            body: blob
-        });
+
+        // 3. 更新リクエストを飛ばす
+        const res = await fetch(
+
+            // apiのurl
+            `https://www.googleapis.com/upload/drive/v3/files/${saveFileInfo.fileId}`, 
+
+            // 更新内容
+            {
+                // 
+                method: 'PATCH',
+                headers: new Headers({
+                    'Authorization': `Bearer ${gapi.client.getToken().access_token}`,
+                    'Content-Type': 'text/plain'
+                }),
+
+                // 内容
+                body: blob
+            }
+        );
+
+        // 通信にエラーがある場合はエラーを返す
+        if(res.status != 200) return err.Err_UpdateFile(res.statusText);
     }
 
     /**
-     * userDataを取得
-     * @returns userDataの内容
+     * userDataの内容を取得
+     * 
+     * 1. getUserDataFileでファイルを取得
+     * 2. 内容をSaveFileInfoに整形する
      */
-    private async getUserData(): Promise<SaveFileInfo | null> {
+    private async getUserData(): Promise<SaveFileInfo | null | err.ErrorInfo> {
 
-        const file = await this.getUserDataFile();
-        if (file == null) return null;
-        const fileId = file.id!;
-        const drive = await this.authModule.GoogleDrive();
-        const res = await drive.files.get({ fileId: fileId, alt: "media" });
-        return { fileId: fileId, content: JSON.parse(res.body) };
+        // 1. ファイルの取得
+        const userDataFile = await this.getUserDataFile();
+        if(err.IsError(userDataFile))return userDataFile;
+        if(userDataFile==null) return null;
 
+        // 2. Idや内容を抜き出す
+        const fileId = userDataFile.id!;
+        const res = await gapi.client.drive.files.get({ fileId: fileId, alt: "media" });
+
+        // 返す
+        if(res.status == 200) return { fileId: fileId, content: JSON.parse(res.body) };
+        else return err.Err_GetFile(res.statusText);
     }
 
-
     /**
-     * userDataを取得
-     * @returns userDataの内容
+     * key, valueペアを(上書き)保存する。
+     * 
+     * 1. Driveに保存されたデータを取得
+     * 2. 初めてデータの保存を行う場合
+     *     2-a. ファイルの作成
+     *     2-b.初期データを作成
+     * 3. key に対する value を更新
+     * 4. ファイルをアップデートする
+     * 
+     * @param key セーブしたいkey
+     * @param value セーブしたいvalue
      */
-    public async getItem(key: string): Promise<string | null> {
+    public async setItem(key: string, value: string): Promise<void|err.ErrorInfo> {
         try {
+            // Auth
+            const authRes = await this.authModule.auth();
+            if(err.IsError(authRes))return authRes;
+
+            // ネットワークに接続されていることを確認
+            if (!window.navigator.onLine) return err.Err_Network();
+
+            if(key == "")return err.Err_Argument("keyとして空文字が渡されました。");
+
             this.isBusy = true;
-            const file = await this.getUserData();
-            if (file == null) return null;
+
+
+            // 1. Driveに保存されたデータを取得
+            let saveData = await this.getUserData();
+            if(err.IsError(saveData))return saveData;
+
+            // 2. nullの場合(まだデータを保存したことがない場合)
+            if (saveData == null) {
+                // 2-a. ファイルを作成
+                const userFile = await this.createFile();
+                if(err.IsError(userFile))return userFile;
+
+                // 2-b. 初期データを設定
+                saveData = { fileId: userFile.id!, content: {} };
+            }
+
+            // 3. key value pairを更新
+            saveData.content[key] = value;
+
+            // 4. ファイルをアップデート
+            var res = await this.updateFile(saveData);
+
+            if(err.IsError(res)) return res;
+        } catch (e) {
+            // 想定外のエラー
+            console.error("データの保存に失敗しました");
+            console.error(e);
+            return err.Err_Unknown(err);
+        }finally{
             this.isBusy = false;
-            return file.content[key];
-        } catch (err) {
-            console.error("データの取得に失敗しました");
-            console.error(err);
-            return null;
         }
     }
 
     /**
-     * userDataを取得
+     * userDataの key に対する value を取得
+     * 
+     *  1. ファイルを読み込む
+     *  2. 受け取ったkeyに対応するValueを返す
+     * 
      * @returns userDataの内容
      */
-    public async deleteItem(): Promise<void> {
+    public async getItem(key: string): Promise<string | undefined | err.ErrorInfo> {
         try {
+            // Auth
+            const authRes = await this.authModule.auth();
+            if(err.IsError(authRes))return authRes;
+
+            // ネットワークに接続されていることを確認
+            if (!window.navigator.onLine) return err.Err_Network();
+
+            if(key == "")return err.Err_Argument("keyとして空文字が渡されました。");
+
             this.isBusy = true;
-            const driveModule = await this.authModule.GoogleDrive();
-            const file = await this.getUserDataFile();
-            if (file == null) return;
-            await driveModule.files.delete({ fileId: file.id! });
+
+            // 1. ファイルを読み込む
+            const file = await this.getUserData();
+            if(err.IsError(file))return file;
+
+            // ファイルがない場合(まだユーザーデータをドライブ上に保存したことがない)
+            // undefinedを返す
+            if (file == null) return undefined;
+
+            // 2. ファイルが見つかった場合、受け取ったkeyに対応するValueを返す
+            return file.content[key];
+        } catch (e) {
+            // 想定外のエラー
+            console.error("データの取得に失敗しました");
+            console.error(e);
+            return err.Err_Unknown(e);
+        } finally {
             this.isBusy = false;
-        } catch (err) {
+        }
+    }
+
+    /**
+     * userDataの key に対する value を削除
+     * 
+     *  1. ファイルを読み込む
+     *  2. 受け取ったkeyに対応するValueを削除
+     *  3. 更新を保存する
+     * 
+     * @returns 対象のkeyが存在し、削除できた場合にtrueをかえす
+     */
+    public async removeItem(key:string): Promise<boolean|err.ErrorInfo>{
+        try {
+            // Auth
+            const authRes = await this.authModule.auth();
+            if(err.IsError(authRes))return authRes;
+
+            // ネットワークに接続されていることを確認
+            if (!window.navigator.onLine) return err.Err_Network();
+
+            if(key == "")return err.Err_Argument("keyとして空文字が渡されました。");
+
+            this.isBusy = true;
+
+            // 1. ファイルを読み込む
+            const file = await this.getUserData();
+            if(err.IsError(file))return file;
+
+            // ファイルがない場合(まだユーザーデータをドライブ上に保存したことがない)
+            // falseを返す
+            if (file == null) return false;
+
+            // 削除を試みる
+            if(file.content.hasOwnProperty(key)){
+                // 指定のキーが存在する場合は削除
+                const { [key]: deletedKey, ...newContent } = file.content;
+
+                // 更新
+                file.content = newContent;
+
+                // 保存
+                const res =await this.updateFile(file);
+                if(err.IsError(res))return res;
+
+                // 削除に成功したのでtrueを返す
+                return true;
+            }else{
+                // 削除するキーがないためfalseを返す
+                return false;
+            }
+        } catch (e) {
+            // 想定外のエラー
+            console.error("データの取得に失敗しました");
+            console.error(e);
+            return err.Err_Unknown(e);
+        } finally {
+            this.isBusy = false;
+        }
+    }
+
+    /**
+     * ファイルごとユーザーデータを削除する
+     * 
+     * 1. ユーザーファイルを取得
+     * 2. 取得したファイルのidを指定して削除する
+     * 
+     */
+    public async clear(): Promise<void|err.ErrorInfo> {
+        try {
+            // Auth
+            const authRes = await this.authModule.auth();
+            if(err.IsError(authRes))return authRes;
+
+            // ネットワークに接続されていることを確認
+            if (!window.navigator.onLine) return err.Err_Network();
+
+            this.isBusy = true;
+
+            // google drive api のモジュールを取得
+            const driveModule = await this.authModule.auth();
+
+            // ユーザーファイルを取得
+            const file = await this.getUserDataFile();
+            if(err.IsError(file)) return file;
+
+            // なければ何もしない
+            if (file == null) return;
+
+            // 取得したファイルを削除する
+            const res = await gapi.client.drive.files.delete({ fileId: file.id! });
+            if(res.status!=200) return err.Err_DeleteFile(res.statusText);
+        } catch (e) {
             console.error("データの削除に失敗しました");
-            console.error(err);
+            console.error(e);
+            return err.Err_Unknown(e);
+        }finally{
+            this.isBusy = false;
         }
     }
 }

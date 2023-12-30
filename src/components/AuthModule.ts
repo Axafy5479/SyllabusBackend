@@ -1,32 +1,46 @@
 import waitUntil from "async-wait-until";
+import * as err from "./error";
 
 /**
  * google authを行うモジュール
  */
 export class AuthModule {
-    failedToAuth = false;
+    failedToLoadModule = {hasError:false,message:""};
 
     private async initialize() {
-        this.failedToAuth = false;
-        this.addScriptElement("https://apis.google.com/js/api.js", () => {
-            this.gapiLoaded(() => { this.failedToAuth = true; console.log("apiのロードに失敗しました。"); });
-        })
-        this.addScriptElement("https://accounts.google.com/gsi/client", () => {
-            this.gisLoaded(() => { this.failedToAuth = true; console.log("認証に失敗しました。"); });
-        });
+        this.failedToLoadModule = {hasError:false,message:""};
+
+        if (!this.gapiInited) {
+            this.addScriptElement("https://apis.google.com/js/api.js", () => {
+                this.gapiLoaded((err) => this.failedToLoadModule = {hasError:true,message:err});
+            })
+        }
+
+        if (!this.gisInited) {
+            this.addScriptElement("https://accounts.google.com/gsi/client", () => {
+                this.gisLoaded((err) => this.failedToLoadModule = {hasError:true,message:err});
+            });
+        }
 
         // どちらもロードされるまで待機
-        await waitUntil(() => this.gisInited && this.gapiInited || this.failedToAuth, { timeout: 1000000 });
-        if (this.failedToAuth) return;
-        console.log("wait for auth");
+        await waitUntil(() => this.gisInited && this.gapiInited || this.failedToLoadModule.hasError, { timeout: 1000000 });
+        if (this.failedToLoadModule.hasError) return;
 
-        // Auth
-        this.signin();
+        if(gapi.client.getToken()==null){
+            // Auth
+            this.signin();
+        }
 
         // 完了するまで待機
-        await waitUntil(() => this.hasTokenObtained || this.failedToAuth, { timeout: 1000000 });
+        await waitUntil(() => this.hasTokenObtained || this.failedToLoadModule.hasError, { timeout: 1000000 });
     }
 
+    /**
+     * 外部モジュールは import で読み込めない
+     * そのため、htmlに<script/>要素を追加してモジュールをロードする
+     * @param url 外部モジュールのurl
+     * @param onloaded 外部モジュールがロードされた時に呼ばれるコールバックメソッド
+     */
     private addScriptElement(url: string, onloaded: () => void) {
 
         // <script />要素作成
@@ -51,7 +65,7 @@ export class AuthModule {
     private gapiInited = false;
 
     // gapiのロード時に同時に読み込むスクリプト
-    private discoveryDoc = [
+    private static DiscoveryDoc = [
         "https://script.googleapis.com/$discovery/rest?version=v1",
         "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"
     ];
@@ -60,7 +74,7 @@ export class AuthModule {
      * Google Identity Services (???)のロード完了のコールバック関数
      * initTokenClient(???)の初期化を行う
      */
-    private gisLoaded(onError: () => void) {
+    private gisLoaded(onError: (err: any) => void) {
         this.tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: import.meta.env.VITE_CLIENT_ID,
             scope: import.meta.env.VITE_SCOPES,
@@ -86,7 +100,7 @@ export class AuthModule {
         try {
             await gapi.client.init({
                 apiKey: import.meta.env.VITE_API_KEY,
-                discoveryDocs: this.discoveryDoc,
+                discoveryDocs: AuthModule.DiscoveryDoc,
             });
             this.gapiInited = true;
         } catch (err) {
@@ -120,11 +134,16 @@ export class AuthModule {
     /**
      * google driveのapiを返す
      */
-    public async GoogleDrive() {
+    public async auth():Promise<err.ErrorInfo|null> {
         if (!this.gapiInited || !this.gisInited || gapi.client.getToken() == null) {
             await this.initialize();
         }
-        return gapi.client.drive;
+
+        if(this.failedToLoadModule.hasError)
+        {
+            return err.Err_LoadModule(this.failedToLoadModule.message);
+        }
+        return null;
     }
 
     /**

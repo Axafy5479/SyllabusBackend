@@ -2,7 +2,7 @@ import { useState } from "react"
 
 export type KeyValueParams={
     buttonTitle:string,
-    onClick:(key:string,value:string)=>Promise<void>,
+    onClick:(key:string,value:string)=>Promise<any>,
 }
 
 export function KeyValueForm(params:KeyValueParams){
