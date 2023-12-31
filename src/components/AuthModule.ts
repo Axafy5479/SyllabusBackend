@@ -80,7 +80,8 @@ export class AuthModule {
             client_id: import.meta.env.VITE_CLIENT_ID,
             scope: import.meta.env.VITE_SCOPES,
             callback: tokenRes => {
-                setAccessTokenCookie(tokenRes.access_token)
+                const expires_in = Number.parseInt(tokenRes.expires_in);
+                setAccessTokenCookie(tokenRes.access_token,expires_in)
                 this.hasTokenObtained = true;
             },
             error_callback: onError,

@@ -1,3 +1,4 @@
+import { removeAccessTokenCookie } from "../cookieUtil";
 import { AuthModule } from "./AuthModule";
 import * as err from "./error";
 
@@ -83,7 +84,7 @@ export class DriveModule {
         // 2. ファイルを作成して返す
         const res = await gapi.client.drive.files.create({resource: DriveModule.FILE_METADATA});
 
-        if(res.status == 200) return res.result;
+        if(Math.round(res.status!/100)==2) return res.result;
         else return err.Err_CreateFile(res.statusText);
     }
 
@@ -128,7 +129,7 @@ export class DriveModule {
         );
 
         // 通信にエラーがある場合はエラーを返す
-        if(res.status != 200) return err.Err_UpdateFile(res.statusText);
+        if(Math.round(res.status!/100)!=2) return err.Err_UpdateFile(res.statusText);
     }
 
     /**
@@ -149,7 +150,7 @@ export class DriveModule {
         const res = await gapi.client.drive.files.get({ fileId: fileId, alt: "media" });
 
         // 返す
-        if(res.status == 200) return { fileId: fileId, content: JSON.parse(res.body) };
+        if(Math.round(res.status!/100)==2) return { fileId: fileId, content: JSON.parse(res.body) };
         else return err.Err_GetFile(res.statusText);
     }
 
@@ -317,8 +318,10 @@ export class DriveModule {
      * 2. 取得したファイルのidを指定して削除する
      * 
      */
-    public async clear(): Promise<void|err.ErrorInfo> {
+    public async deleteAccount(): Promise<void|err.ErrorInfo> {
         try {
+            removeAccessTokenCookie();
+
             // Auth
             const authRes = await this.authModule.auth();
             if(err.IsError(authRes))return authRes;
@@ -337,7 +340,11 @@ export class DriveModule {
 
             // 取得したファイルを削除する
             const res = await gapi.client.drive.files.delete({ fileId: file.id! });
-            if(res.status!=200) return err.Err_DeleteFile(res.statusText);
+
+            if(Math.round(res.status!/100)!=2) {
+                this.authModule.signout();
+                return err.Err_DeleteFile(res.statusText);
+            }
         } catch (e) {
             console.error("データの削除に失敗しました");
             console.error(e);

@@ -2,6 +2,7 @@ import './App.css'
 import { DriveModule as DriveModule } from "./components/DriveModule";
 import { useState } from 'react';
 import { IsError } from './components/error';
+import { removeAccessTokenCookie } from './cookieUtil';
 
 const driveModule = new DriveModule();
 
@@ -54,6 +55,17 @@ function App() {
         setIsBusy(false);
     }
 
+    /************** アカウント削除 ******************/
+
+    const [deleteAccountRes, setDeleteAccountRes] = useState<string>("");
+
+    async function onDeleteAccount(){
+        setIsBusy(true);
+        const res = await driveModule.deleteAccount();
+        if (IsError(res)) setDeleteAccountRes(res.title);
+        else setDeleteAccountRes("done");
+        setIsBusy(false);
+    }
 
     return (
         <>
@@ -86,6 +98,13 @@ function App() {
                             <td><input onChange={e => setRemovingKey(e.target.value)} /></td>
                             <td>{removeResult}</td>
                             <td><button disabled={isBusy} onClick={()=>onRemove()}>remove</button></td>
+                        </tr>
+
+                        {/* delete account */}
+                        <tr>
+                            <td></td>
+                            <td>{deleteAccountRes}</td>
+                            <td><button disabled={isBusy} onClick={()=>onDeleteAccount()}>delete account</button></td>
                         </tr>
 
                     </tbody>
