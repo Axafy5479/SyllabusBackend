@@ -2,7 +2,6 @@ import './App.css'
 import { DriveModule as DriveModule } from "./components/DriveModule";
 import { useState } from 'react';
 import { IsError } from './components/error';
-import { removeAccessTokenCookie } from './cookieUtil';
 
 const driveModule = new DriveModule();
 

@@ -80,14 +80,18 @@ export class AuthModule {
             client_id: import.meta.env.VITE_CLIENT_ID,
             scope: import.meta.env.VITE_SCOPES,
             callback: tokenRes => {
+                // トークンの期限
                 const expires_in = Number.parseInt(tokenRes.expires_in);
-                setAccessTokenCookie(tokenRes.access_token,expires_in)
+
+                // 期限 - 6分をクッキーの期限に設定
+                setAccessTokenCookie(tokenRes.access_token,expires_in - 360);
                 this.hasTokenObtained = true;
             },
             error_callback: onError,
         });
         this.gisInited = true;
     }
+
 
     /**
      * googleのサービスのAPIを叩くモジュール(api.js)のロード完了のコールバック関数
@@ -146,8 +150,13 @@ export class AuthModule {
      * google driveのapiを返す
      */
     public async auth(): Promise<err.ErrorInfo | null> {
-        if (!this.gapiInited || !this.gisInited || gapi.client.getToken() == null) {
+        const hasToken = getAccessTokenCookie()!=null;
+        if (!this.gapiInited || !this.gisInited) {
             await this.initialize();
+        }else if(!hasToken){
+            this.hasTokenObtained = false;
+            this.signin();
+            await waitUntil(()=>this.hasTokenObtained);
         }
 
         if (this.failedToLoadModule.hasError) {
