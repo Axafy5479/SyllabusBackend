@@ -12,6 +12,8 @@ https://syllabusbackend.onrender.com/
 中段は保存されたkey-valueペアを検索することができます。
 下段はkeyを指定してデータを削除することができます。keyが存在し正しく削除された場合はtrue、削除できなかった場合はfalseが表示されます。
 
+この例はreact+typescriptのものですが、純粋なhtmlでモジュールを使用する例も「html-sample」に挙げています。ただしapikeyなどの環境変数を省いているため動作しません。
+
 ### このdemoのデータを削除する
 https://drive.google.com/drive/settings
 
